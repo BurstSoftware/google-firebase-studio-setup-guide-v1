@@ -1,12 +1,27 @@
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
+import json
 import os
 
 # Initialize Firebase (only once)
 if not firebase_admin._apps:
-    cred = credentials.Certificate("firestore-key.json")
-    firebase_admin.initialize_app(cred)
+    try:
+        # Check if running on Streamlit Cloud with secrets
+        if "FIREBASE_CREDENTIALS" in st.secrets:
+            # Parse JSON credentials from secrets
+            cred = credentials.Certificate(json.loads(st.secrets["FIREBASE_CREDENTIALS"]))
+        else:
+            # Fallback to local firestore-key.json
+            if not os.path.exists("firestore-key.json"):
+                raise FileNotFoundError("firestore-key.json not found in the project directory.")
+            cred = credentials.Certificate("firestore-key.json")
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error(f"Failed to initialize Firebase: {str(e)}")
+        st.write("Please ensure Firebase credentials are correctly set up. For local runs, place 'firestore-key.json' in the project root. For Streamlit Cloud, configure secrets in the app settings.")
+        st.stop()  # Halt execution if Firebase initialization fails
+
 db = firestore.client()
 
 st.title("Firebase Studio Setup Guide")
@@ -65,13 +80,19 @@ st.subheader("Save Notes to Firestore")
 note = st.text_area("Add a note about Firebase Studio setup:")
 if st.button("Save Note"):
     if note:
-        db.collection("setup_notes").add({"note": note, "timestamp": firestore.SERVER_TIMESTAMP})
-        st.success("Note saved to Firestore!")
+        try:
+            db.collection("setup_notes").add({"note": note, "timestamp": firestore.SERVER_TIMESTAMP})
+            st.success("Note saved to Firestore!")
+        except Exception as e:
+            st.error(f"Failed to save note: {str(e)}")
     else:
         st.error("Please enter a note.")
 
 st.subheader("Saved Notes")
-notes = db.collection("setup_notes").order_by("timestamp", direction=firestore.Query.DESCENDING).stream()
-for doc in notes:
-    data = doc.to_dict()
-    st.write(f"- {data['note']} (Saved: {data['timestamp']})")
+try:
+    notes = db.collection("setup_notes").order_by("timestamp", direction=firestore.Query.DESCENDING).stream()
+    for doc in notes:
+        data = doc.to_dict()
+        st.write(f"- {data['note']} (Saved: {data['timestamp']})")
+except Exception as e:
+    st.error(f"Failed to load notes: {str(e)}")
