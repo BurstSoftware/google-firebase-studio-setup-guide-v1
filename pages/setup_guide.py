@@ -4,12 +4,12 @@ from firebase_admin import credentials, firestore
 import json
 import os
 
-# Initialize Firebase (only once)
+# Initialize Firebase only if credentials are available
+db = None
 if not firebase_admin._apps:
     try:
-        # Check if running on Streamlit Cloud with secrets
         if "FIREBASE_CREDENTIALS" in st.secrets:
-            # Parse JSON credentials from secrets
+            # Use Streamlit Secrets for cloud deployment
             cred = credentials.Certificate(json.loads(st.secrets["FIREBASE_CREDENTIALS"]))
         else:
             # Fallback to local firestore-key.json
@@ -17,12 +17,15 @@ if not firebase_admin._apps:
                 raise FileNotFoundError("firestore-key.json not found in the project directory.")
             cred = credentials.Certificate("firestore-key.json")
         firebase_admin.initialize_app(cred)
+        db = firestore.client()
     except Exception as e:
-        st.error(f"Failed to initialize Firebase: {str(e)}")
-        st.write("Please ensure Firebase credentials are correctly set up. For local runs, place 'firestore-key.json' in the project root. For Streamlit Cloud, configure secrets in the app settings.")
-        st.stop()  # Halt execution if Firebase initialization fails
-
-db = firestore.client()
+        st.warning(f"Firebase Firestore is not available: {str(e)}")
+        st.markdown("""
+        **Note**: The note-saving feature requires Firebase setup. To enable it:
+        - **Local**: Place `firestore-key.json` in the project root (download from Firebase Console > Project Settings > Service Accounts).
+        - **Streamlit Cloud**: Add `FIREBASE_CREDENTIALS` to secrets with the JSON content of `firestore-key.json`.
+        See [Firebase Setup Guide](https://firebase.google.com/docs/admin/setup) for details.
+        """)
 
 st.title("Firebase Studio Setup Guide")
 
@@ -75,24 +78,27 @@ Firebase Studio is a cloud-based development environment powered by Gemini 2.5 P
 For detailed pricing, visit [firebase.google.com](https://firebase.google.com).
 """)
 
-# Firestore Integration: Save and Display Notes
-st.subheader("Save Notes to Firestore")
-note = st.text_area("Add a note about Firebase Studio setup:")
-if st.button("Save Note"):
-    if note:
-        try:
-            db.collection("setup_notes").add({"note": note, "timestamp": firestore.SERVER_TIMESTAMP})
-            st.success("Note saved to Firestore!")
-        except Exception as e:
-            st.error(f"Failed to save note: {str(e)}")
-    else:
-        st.error("Please enter a note.")
+# Firestore Integration: Save and Display Notes (Optional)
+if db:
+    st.subheader("Save Notes to Firestore")
+    note = st.text_area("Add a note about Firebase Studio setup:")
+    if st.button("Save Note"):
+        if note:
+            try:
+                db.collection("setup_notes").add({"note": note, "timestamp": firestore.SERVER_TIMESTAMP})
+                st.success("Note saved to Firestore!")
+            except Exception as e:
+                st.error(f"Failed to save note: {str(e)}")
+        else:
+            st.error("Please enter a note.")
 
-st.subheader("Saved Notes")
-try:
-    notes = db.collection("setup_notes").order_by("timestamp", direction=firestore.Query.DESCENDING).stream()
-    for doc in notes:
-        data = doc.to_dict()
-        st.write(f"- {data['note']} (Saved: {data['timestamp']})")
-except Exception as e:
-    st.error(f"Failed to load notes: {str(e)}")
+    st.subheader("Saved Notes")
+    try:
+        notes = db.collection("setup_notes").order_by("timestamp", direction=firestore.Query.DESCENDING).stream()
+        for doc in notes:
+            data = doc.to_dict()
+            st.write(f"- {data['note']} (Saved: {data['timestamp']})")
+    except Exception as e:
+        st.error(f"Failed to load notes: {str(e)}")
+else:
+    st.info("Note-saving feature is disabled due to missing Firebase credentials. Follow the instructions above to enable it.")
